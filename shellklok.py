@@ -1,8 +1,10 @@
+# v0.4
 import os
 import curses
 import datetime
 import subprocess
 import time
+import configparser
 
 def get_available_fonts():
     font_dir = "/usr/share/figlet/fonts"
@@ -15,6 +17,61 @@ def get_available_fonts():
     except FileNotFoundError:
         fonts = ["slant", "block", "jazmine"]
     return fonts
+
+def load_config():
+    defaults = {
+        "FONT": 0,
+        "COLOR": 0,
+        "SECONDS": 0,
+        "MODE": 0
+    }
+    config_dir = os.path.expanduser("~/.config/shellklok")
+    config_path = os.path.join(config_dir, "config.ini")
+    if not os.path.exists(config_path):
+        return defaults.copy()
+
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_path)
+    except:
+        return defaults.copy()
+
+    state = defaults.copy()
+    if not config.has_section('settings'):
+        return state
+
+    try:
+        state["FONT"] = config.getint('settings', 'font')
+    except (configparser.NoOptionError, ValueError):
+        pass
+    try:
+        state["COLOR"] = config.getint('settings', 'color')
+    except (configparser.NoOptionError, ValueError):
+        pass
+    try:
+        state["SECONDS"] = config.getint('settings', 'seconds')
+    except (configparser.NoOptionError, ValueError):
+        pass
+    try:
+        state["MODE"] = config.getint('settings', 'mode')
+    except (configparser.NoOptionError, ValueError):
+        pass
+
+    return state
+
+def save_config(state):
+    config_dir = os.path.expanduser("~/.config/shellklok")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.ini")
+    config = configparser.ConfigParser()
+    config['settings'] = {
+        'font': str(state["FONT"]),
+        'color': str(state["COLOR"]),
+        'seconds': str(state["SECONDS"]),
+        'mode': str(state["MODE"])
+    }
+    with open(config_path, 'w') as configfile:
+        config.write(configfile)
 
 class ClockMenu:
     def __init__(self, fonts):
@@ -131,12 +188,16 @@ def main(stdscr):
     fonts = get_available_fonts()
     menu = ClockMenu(fonts)
 
-    state = {
-        "FONT": 0,
-        "COLOR": 0,  # Starts at 0 (white)
-        "SECONDS": 0,
-        "MODE": 0
-    }
+    state = load_config()
+
+    # Clamp loaded state to valid ranges
+    if fonts:
+        state["FONT"] = max(0, min(state["FONT"], len(fonts)-1))
+    else:
+        state["FONT"] = 0
+    state["COLOR"] = max(0, min(state["COLOR"], len(color_info)-1))
+    state["SECONDS"] = 1 if state["SECONDS"] else 0
+    state["MODE"] = 1 if state["MODE"] else 0
 
     while True:
         key = stdscr.getch()
@@ -148,14 +209,19 @@ def main(stdscr):
             new_state = menu.show(stdscr, state)
             if new_state is not None:
                 state = new_state
+                save_config(state)
         elif key == ord('c'):
             state["COLOR"] = (state["COLOR"] + 1) % len(color_info)
+            save_config(state)
         elif key == ord('f'):
             state["FONT"] = (state["FONT"] + 1) % len(fonts)
+            save_config(state)
         elif key == ord('s'):
             state["SECONDS"] = 1 - state["SECONDS"]
+            save_config(state)
         elif key == ord('a'):
             state["MODE"] = 1 - state["MODE"]
+            save_config(state)
 
         # Time formatting
         if state["MODE"] == 1:
@@ -178,7 +244,7 @@ def main(stdscr):
         lines = art.split('\n')
         start_y = max(0, (h - len(lines)) // 2)
 
-        # Get current color (now white is index 0)
+        # Get current color
         color_name = menu.items[1][1][state["COLOR"]]
         color_pair = color_map[color_name]
 
