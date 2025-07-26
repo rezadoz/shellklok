@@ -7,7 +7,12 @@ import time
 import configparser
 
 def get_available_fonts():
-    font_dir = "/usr/share/figlet/fonts"
+    try:
+        # Get the font directory dynamically using figlet -I 2
+        font_dir = subprocess.check_output(["figlet", "-I", "2"], universal_newlines=True).strip()
+    except subprocess.CalledProcessError:
+        font_dir = "/usr/share/figlet/fonts"  # Fallback, though unlikely to work on NixOS
+
     fonts = []
     try:
         for f in os.listdir(font_dir):
@@ -15,7 +20,7 @@ def get_available_fonts():
                 fonts.append(os.path.splitext(f)[0])
         fonts.sort()
     except FileNotFoundError:
-        fonts = ["slant", "block", "jazmine"]
+        fonts = ["slant", "block", "jazmine"]  # Fallback list
     return fonts
 
 def load_config():
