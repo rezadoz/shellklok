@@ -1,4 +1,4 @@
-# v0.4
+# v0.6
 import os
 import curses
 import datetime
@@ -221,6 +221,9 @@ def main(stdscr):
         elif key == ord('f'):
             state["FONT"] = (state["FONT"] + 1) % len(fonts)
             save_config(state)
+        elif key == ord('F'):
+                state["FONT"] = (state["FONT"] - 1) % len(fonts)
+                save_config(state)
         elif key == ord('s'):
             state["SECONDS"] = 1 - state["SECONDS"]
             save_config(state)
