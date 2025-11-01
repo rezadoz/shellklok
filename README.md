@@ -75,6 +75,7 @@ The program automatically creates:
 ```
 on first run to store your preferences.
 
-![a screencap](https://i.imgur.com/TCN5nba.png)
-![a second screencap](https://i.imgur.com/wKxglrk.png)
-![a third screencap](https://i.imgur.com/lU52MVW.png)
+<img width="855" height="565" alt="image" src="https://github.com/user-attachments/assets/d62b7a10-949c-483f-be69-4da267c95994" />
+<img width="855" height="565" alt="image" src="https://github.com/user-attachments/assets/9dc7fc4f-7416-4527-81a1-46ac1fac9502" />
+<img width="855" height="565" alt="image" src="https://github.com/user-attachments/assets/23933f6b-e26a-4ef6-9059-d0ee8649cbad" />
+
