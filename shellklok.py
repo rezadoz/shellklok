@@ -2,8 +2,14 @@
 #----written by bryan reza----------#
 #----bug fixes and optimizations----#
 
-import datetime os subprocess sys time
-import argparser configparser curses
+import os
+import sys
+import curses
+import datetime
+import subprocess
+import time
+import configparser
+import argparse
 
 #--constants--#
 REFRESH_INTERVAL = 0.1
