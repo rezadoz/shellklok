@@ -1,17 +1,19 @@
-# v0.6
-import os
-import curses
-import datetime
-import subprocess
-import time
-import configparser
+#----shellklok v0.8-2025-11-1-------#
+#----written by bryan reza----------#
+#----bug fixes and optimizations----#
+
+import datetime os subprocess sys time
+import argparser configparser curses
+
+#--constants--#
+REFRESH_INTERVAL = 0.1
+CONFIG_SAVE_DELAY = 2.0
 
 def get_available_fonts():
     try:
-        # Get the font directory dynamically using figlet -I 2
         font_dir = subprocess.check_output(["figlet", "-I", "2"], universal_newlines=True).strip()
     except subprocess.CalledProcessError:
-        font_dir = "/usr/share/figlet/fonts"  # Fallback, though unlikely to work on NixOS
+        font_dir = "/usr/share/figlet/fonts"
 
     fonts = []
     try:
@@ -20,7 +22,11 @@ def get_available_fonts():
                 fonts.append(os.path.splitext(f)[0])
         fonts.sort()
     except FileNotFoundError:
-        fonts = ["slant", "block", "jazmine"]  # Fallback list
+        fonts = ["slant", "block", "jazmine"]
+
+    if not fonts:
+        raise RuntimeError("No figlet fonts found. Please install figlet.")
+
     return fonts
 
 def load_config():
@@ -38,7 +44,7 @@ def load_config():
     config = configparser.ConfigParser()
     try:
         config.read(config_path)
-    except:
+    except (configparser.Error, IOError):
         return defaults.copy()
 
     state = defaults.copy()
@@ -95,16 +101,16 @@ class ClockMenu:
         stdscr.nodelay(0)
 
         while True:
-            h, w = stdscr.getmaxyx()
-            menu_h = len(self.items) + 2
-            menu_w = 35
+            height, width = stdscr.getmaxyx()
+            menu_height = len(self.items) + 2  # +2 for borders
+            menu_width = 35
 
-            if menu_h > h or menu_w > w:
+            if menu_height > height or menu_width > width:
                 break
 
-            win_y = (h - menu_h) // 2
-            win_x = (w - menu_w) // 2
-            win = curses.newwin(menu_h, menu_w, win_y, win_x)
+            win_y = (height - menu_height) // 2
+            win_x = (width - menu_width) // 2
+            win = curses.newwin(menu_height, menu_width, win_y, win_x)
             win.border()
 
             for idx, (label, options) in enumerate(self.items):
@@ -137,26 +143,50 @@ class ClockMenu:
         stdscr.nodelay(1)
         return self.values
 
+def print_help():
+    """Print help message to stdout."""
+    help_text = """shellklok - an ASCII digital tty clock using figlet
+
+Usage: shellklok [OPTIONS]
+
+Options:
+  -h, --help    Show this help message and exit
+
+Interactive Controls:
+  [q/x] - quit
+  [c]   - cycle colors
+  [f]   - cycle fonts forward
+  [F]   - cycle fonts backward
+  [s]   - toggle seconds
+  [a]   - 12/24h mode
+  [m]   - settings menu
+  [h]   - show help dialog
+"""
+    print(help_text)
+
 def show_help(stdscr):
     help_text = [
         "shellklok",
         "an ASCII digital tty clock using figlet",
         "[q/x] - quit",
         "[c]   - cycle colors",
-        "[f]   - cycle fonts",
+        "[f]   - cycle fonts forward",
+        "[F]   - cycle fonts backward",
         "[s]   - toggle seconds",
         "[a]   - 12/24h mode",
         "[m]   - settings menu",
         "[h]   - this help"
     ]
-    h, w = stdscr.getmaxyx()
-    win_h = len(help_text) + 2
-    win_w = max(len(line) for line in help_text) + 4
+    height, width = stdscr.getmaxyx()
+    window_height = len(help_text) + 2  # +2 for borders
+    window_width = max(len(line) for line in help_text) + 4
 
-    if win_h > h or win_w > w:
+    if window_height > height or window_width > width:
         return
 
-    win = curses.newwin(win_h, win_w, (h-win_h)//2, (w-win_w)//2)
+    win = curses.newwin(window_height, window_width,
+                       (height - window_height) // 2,
+                       (width - window_width) // 2)
     win.border()
     for i, line in enumerate(help_text):
         win.addstr(i+1, 2, line)
@@ -171,7 +201,7 @@ def main(stdscr):
     stdscr.nodelay(1)
     curses.start_color()
 
-    # Updated color order with white first
+    # color configuration
     color_info = [
         ("white", curses.COLOR_WHITE),
         ("red", curses.COLOR_RED),
@@ -183,87 +213,133 @@ def main(stdscr):
         ("black", curses.COLOR_BLACK)
     ]
 
-    # Initialize color pairs (1-8)
+    # initialize color pairs once
     for pair_num, (name, color) in enumerate(color_info, start=1):
         curses.init_pair(pair_num, color, curses.COLOR_BLACK)
 
-    # Create color mapping dictionary
+    # create color mapping dictionary once
     color_map = {name: pair_num for pair_num, (name, color) in enumerate(color_info, start=1)}
 
-    fonts = get_available_fonts()
-    menu = ClockMenu(fonts)
+    try:
+        fonts = get_available_fonts()
+    except RuntimeError as e:
+        stdscr.addstr(0, 0, str(e))
+        stdscr.refresh()
+        time.sleep(3)
+        return
 
+    menu = ClockMenu(fonts)
     state = load_config()
 
-    # Clamp loaded state to valid ranges
-    if fonts:
-        state["FONT"] = max(0, min(state["FONT"], len(fonts)-1))
-    else:
-        state["FONT"] = 0
+    # clamp loaded state to valid ranges
+    state["FONT"] = max(0, min(state["FONT"], len(fonts)-1))
     state["COLOR"] = max(0, min(state["COLOR"], len(color_info)-1))
     state["SECONDS"] = 1 if state["SECONDS"] else 0
     state["MODE"] = 1 if state["MODE"] else 0
 
+    # cache for figlet output
+    last_time_str = ""
+    cached_art = ""
+
+    # debounced config saving
+    config_dirty = False
+    last_change_time = 0
+
     while True:
+        current_time = time.time()
+
+        # save config if dirty and enough time has passed
+        if config_dirty and (current_time - last_change_time) >= CONFIG_SAVE_DELAY:
+            save_config(state)
+            config_dirty = False
+
         key = stdscr.getch()
         if key in [ord('q'), ord('x')]:
+            if config_dirty:
+                save_config(state)
             break
         elif key == ord('h'):
             show_help(stdscr)
         elif key == ord('m'):
             new_state = menu.show(stdscr, state)
-            if new_state is not None:
-                state = new_state
-                save_config(state)
+            state = new_state
+            config_dirty = True
+            last_change_time = current_time
         elif key == ord('c'):
             state["COLOR"] = (state["COLOR"] + 1) % len(color_info)
-            save_config(state)
+            config_dirty = True
+            last_change_time = current_time
         elif key == ord('f'):
-            state["FONT"] = (state["FONT"] + 1) % len(fonts)
-            save_config(state)
+            if fonts:
+                state["FONT"] = (state["FONT"] + 1) % len(fonts)
+                config_dirty = True
+                last_change_time = current_time
         elif key == ord('F'):
+            if fonts:
                 state["FONT"] = (state["FONT"] - 1) % len(fonts)
-                save_config(state)
+                config_dirty = True
+                last_change_time = current_time
         elif key == ord('s'):
             state["SECONDS"] = 1 - state["SECONDS"]
-            save_config(state)
+            config_dirty = True
+            last_change_time = current_time
         elif key == ord('a'):
             state["MODE"] = 1 - state["MODE"]
-            save_config(state)
+            config_dirty = True
+            last_change_time = current_time
 
-        # Time formatting
+        # time formatting
         if state["MODE"] == 1:
-            time_format = "%I:%M:%S %p" if state["SECONDS"] == 0 else "%I:%M %p"
+            time_format = "%I:%M:%S %p" if state["SECONDS"] == 1 else "%I:%M %p"
         else:
-            time_format = "%H:%M:%S" if state["SECONDS"] == 0 else "%H:%M"
+            time_format = "%H:%M:%S" if state["SECONDS"] == 1 else "%H:%M"
 
         time_str = datetime.datetime.now().strftime(time_format)
 
-        try:
-            art = subprocess.check_output(
-                ["figlet", "-t", "-f", fonts[state["FONT"]], time_str],
-                universal_newlines=True
-            )
-        except:
-            art = "FONT ERROR"
+        # update figlet output only if time has changed
+        if time_str != last_time_str:
+            try:
+                cached_art = subprocess.check_output(
+                    ["figlet", "-t", "-f", fonts[state["FONT"]], time_str],
+                    universal_newlines=True,
+                    stderr=subprocess.DEVNULL
+                )
+                last_time_str = time_str
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                cached_art = "FIGLET ERROR\nPlease install figlet"
+                last_time_str = time_str
 
         stdscr.erase()
-        h, w = stdscr.getmaxyx()
-        lines = art.split('\n')
-        start_y = max(0, (h - len(lines)) // 2)
+        height, width = stdscr.getmaxyx()
+        lines = cached_art.split('\n')
+        start_y = max(0, (height - len(lines)) // 2)
 
-        # Get current color
+        # get current color
         color_name = menu.items[1][1][state["COLOR"]]
         color_pair = color_map[color_name]
 
         for i, line in enumerate(lines):
-            if i >= h:
+            if i >= height:
                 break
-            x = max(0, (w - len(line)) // 2)
-            stdscr.addstr(start_y + i, x, line[:w-1], curses.color_pair(color_pair))
+            x = max(0, (width - len(line)) // 2)
+            if x < width:
+                stdscr.addstr(start_y + i, x, line[:width-1], curses.color_pair(color_pair))
 
         stdscr.refresh()
-        time.sleep(0.1)
+        time.sleep(REFRESH_INTERVAL)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="shellklok - an ASCII digital tty clock using figlet",
+        add_help=False
+    )
+    parser.add_argument('-h', '--help', action='store_true',
+                       help='Show this help message and exit')
+
+    args = parser.parse_args()
+
+    if args.help:
+        print_help()
+        sys.exit(0)
+
     curses.wrapper(main)
